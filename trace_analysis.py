@@ -31,6 +31,8 @@ from scipy.ndimage import uniform_filter1d
 from pybaselines import Baseline
 from pybaselines.utils import gaussian
 
+from tqdm import tqdm
+
 def first_non_zero_elem(arr):
     for element in arr:
         if element != 0:
@@ -124,9 +126,9 @@ frequencies, response = sosfreqz(sos, worN=2000, fs=sampling_rate)
 
 
 
-path=r'Y:\File transfer\Michelle_transfer\IMARIS\IMARIS traces\20230612\20230612_testis_ATP_3.1\ATP on testis_c_ATP3.1_0_Statistics\ATP on testis_c_ATP3.1_0_Plot.csv'
+path=r'C:\Users\wiesbrock\Desktop\IMARIS traces\20230522\20230522_glass_spont_S001\plot_merged.xlsx'
 #background=r'Y:\File transfer\Michelle_transfer\IMARIS\IMARIS traces\20230531\2020531_Series009_testis\20230531_testis_h_Series009_2_Statistics\20230531_testis_h_Series009_2_Plot_bckgr.xlsx'
-data=pd.read_csv(path,skiprows=(0,1,2))
+data=pd.read_excel(path)
 data.fillna(0)
 #background=pd.read_excel(background)
 names=data.columns
@@ -139,7 +141,9 @@ data=np.array(data)
 
 
 # Schleife über die Spalten des Arrays
-for col in range(data.shape[1]):
+#for o in tqdm
+print('Corrections')
+for col in tqdm(range(data.shape[1])):
     # Finden der NaN-Werte in der aktuellen Spalte
     nan_indices = np.isnan(data[:, col])
     
@@ -149,6 +153,7 @@ for col in range(data.shape[1]):
     # Ersetzen der NaN-Werte in der aktuellen Spalte durch den Durchschnitt
     data[nan_indices, col] = col_mean
 
+print('Corrections done')
 
 data=np.delete(data, 0, axis=1)
 
@@ -157,27 +162,31 @@ data=pd.DataFrame(data)
 data.columns=names_data
 
 #data_normalized=data
-data_normalized=data.copy()
-data_smoothed=data.copy()
-data_average=data.copy()
+data_normalized=np.array(data.copy())
+data_smoothed=np.array(data.copy())
+data_average=np.array(data.copy())
+data=np.array(data)
 names_data=names_data[:-1]
 #data_filtered=data
 #data_bin=np.array(data)
 x = np.linspace(1, data_smoothed.shape[0], data_smoothed.shape[0])
 baseline_fitter = Baseline(x_data=x)
 
-for i in range(len(names_data)):
+
+print('Smoothing...')
+for i in tqdm(range(len(names_data))):
    kernel_size = 11
    kernel = np.ones(kernel_size) / kernel_size
-   data_smoothed[names_data[i]]=data_normalized[names_data[i]]-baseline_fitter.modpoly(data[names_data[i]],poly_order=5)[0]
-   data_smoothed[names_data[i]] = np.convolve(data_smoothed[names_data[i]], kernel, mode='same')
+   data_smoothed[:,i]=data_normalized[:,i]-baseline_fitter.modpoly(data[:,i],poly_order=5)[0]
+   data_smoothed[:,i] = np.convolve(data_smoothed[:,i], kernel, mode='same')
+print('Smoothing done')
 
-
- 
-for i in range(len(names_data)):
-    data_normalized[names_data[i]]=stats.zscore(data_smoothed[names_data[i]])
-
-                                           
+print('Z-Normalization...') 
+for i in tqdm(range(len(names_data))):
+    data_normalized[:,i]=stats.zscore(data_smoothed[:,i])
+print('Z-Normalization done')
+#data_normalized=data_normalized.fillna(0)       
+#data_smoothed=data_smoothed.fillna(0)                                   
     
 data_normalized=np.array(data_normalized)
 data_normalized=np.delete(data_normalized,data_normalized.shape[1]-1,axis=1)
@@ -195,25 +204,28 @@ data_bin[data_normalized>2.]=1
 
 
 
-
-for i in range(data_bin.shape[1]):
+print('Binary smoothing')
+for i in tqdm(range(data_bin.shape[1])):
     kernel_size = 35
     kernel = np.ones(kernel_size) / kernel_size
     data_bin[:,i] = np.convolve(data_bin[:,i], kernel, mode='same')
-
+print('Binary smoothing done')
 data_bin[data_bin!=0]=1
 diff_bin=np.zeros((data_bin.shape[0]-1,len(names_data)))
 
-
-for col in range(data_bin.shape[1]):
+print('Check for peaks starting in the beginning or the end')
+for col in tqdm(range(data_bin.shape[1])):
     # Finden der NaN-Werte in der aktuellen Spalte
     if data_bin[0, col]==1:
         data_bin[0, col]=0
+    if data_bin[-1,col]==1:
+        data_bin[-1, col]=0
     diff_bin[:,col]=np.diff(data_bin[:,col])
 
 peak_start=[]
 peak_end=[]
-for col in range(data_bin.shape[1]):
+print('Creating peak lists')
+for col in tqdm(ange(data_bin.shape[1])):
     # Finden der NaN-Werte in der aktuellen Spalte
     peak_start.append(np.where(diff_bin[:,col]==1))
     peak_end.append(np.where(diff_bin[:,col]==-1))
@@ -235,12 +247,13 @@ for start_array, end_array in zip(peak_start, peak_end):
 list_all_amplitudes=[]
 list_all_fwhm=[]
 list_number_peaks=[]
-for i in  range(len(peak_start_plus)):
+print('Fit the signals')
+for i in tqdm(range(len(peak_start_plus))):
     list_amplitudes=[]
     list_fwhm=[]
     for j in range(len(peak_start_plus[i])):
         x=np.linspace(peak_start_plus[i][j],peak_end_plus[i][j],peak_end_plus[i][j]-peak_start_plus[i][j])
-        y=data_smoothed[names_data[i]][peak_start_plus[i][j]:peak_end_plus[i][j]]
+        y=data_smoothed[:,i][peak_start_plus[i][j]:peak_end_plus[i][j]]
         y=np.array(y)
 
 
@@ -260,28 +273,37 @@ for i in  range(len(peak_start_plus)):
         # Optional: Plot der Daten und des Gauß-Fits
         import matplotlib.pyplot as plt
         
-        plt.figure(figsize=(8, 6))
-        plt.plot(x, y, 'b', label='Daten')
-        x=np.linspace(int(mu_fit)-500,int(mu_fit)+500,1000)
-        plt.plot(x, lorentzian(x, A_fit, mu_fit, sigma_fit), 'r', label='Lorenz-Fit')
-        plt.xlabel('X-Achse')
-        plt.ylabel('Y-Achse')
-        plt.title(str(max(y)-min(y)))
-        plt.legend()
-        plt.show()
+        #plt.figure(figsize=(8, 6))
+        #plt.plot(x, y, 'b', label='Daten')
+        #x=np.linspace(int(mu_guess)-500,int(mu_guess)+500,1000)
+        #if mu_fit>1000:
+        #    mu_fit=mu_guess
+        #plt.plot(x, lorentzian(x, A_fit, mu_fit, sigma_fit), 'r', label='Lorenz-Fit')
+        #plt.xlabel('X-Achse')
+        #plt.ylabel('Y-Achse')
+        #plt.title(str(max(y)-min(y)))
+        #plt.legend()
+        #plt.show()
         
         
-        fwhm=half_max_x(x, lorentzian(x, A_fit, mu_fit, sigma_fit))
-        list_amplitudes.append(np.max(y)-np.min(y))
-        list_fwhm.append(fwhm[1]-fwhm[0])
-        print(fwhm[1]-fwhm[0])
+        try:    
+            fwhm=half_max_x(x, lorentzian(x, A_fit, mu_guess, sigma_fit))
+            list_amplitudes.append(np.max(y)-np.min(y))
+            list_fwhm.append(fwhm[1]-fwhm[0])
+            print(fwhm[1]-fwhm[0])
+        except:
+            print('no fit')
+            
+                
         
     list_all_amplitudes.append(list_amplitudes)
     list_all_fwhm.append(list_fwhm)
     list_number_peaks.append(len(list_amplitudes))
-    
-        
-
+print('Fit the signals done')   
+list_number_peaks=np.array(list_number_peaks)        
+names_active=names_data[list_number_peaks>1]
+active_indices=np.where(list_number_peaks>1)[0]
+'''
 for i in range(len(names_data)-1):
     plt.figure()
     
@@ -296,19 +318,21 @@ for i in range(len(names_data)-1):
     plt.xticks([])
     plt.subplot(311)
     plt.title('raw')
-    plt.plot(data[names_data[i]])
+    plt.plot(data[:,i])
     plt.xticks([])
     sns.despine()
     plt.tight_layout()
+'''
     
-maximum_lag=60
-b=np.zeros((60))
-corr_matrx=np.zeros((len(names_data),len(names_data)))    
-index_max_corr=np.zeros((len(names_data),len(names_data)))
-for i in range(len(names_data)):
-    for k in range(len(names_data)):
-        trace_1=(data_smoothed[names_data[i]])
-        trace_2=(data_smoothed[names_data[k]])
+maximum_lag=30
+b=np.zeros((30))
+corr_matrx=np.zeros((len(names_active),len(names_active)))    
+index_max_corr=np.zeros((len(names_active),len(names_active)))
+print('Calculating correlations')
+for i in tqdm(range(len(names_active))):
+    for k in range(len(names_active)):
+        trace_1=(data[:,active_indices[i]])
+        trace_2=(data[:,active_indices[k]])
         trace_1=pd.DataFrame(trace_1)
         trace_2=pd.DataFrame(trace_2)
         trace_1=trace_1.squeeze()
@@ -321,11 +345,94 @@ for i in range(len(names_data)):
             
             index_max_corr[i,k]=(np.where(b==np.nanmax(b))[0][0])
             
+print('Calculating correlations done')
+            
 plt.figure()
 plt.imshow(corr_matrx, cmap='rainbow')
 
 df = pd.DataFrame(corr_matrx)
 df.to_excel(r'.\\correlations.xlsx', index=False)
+
+def distance(x1, y1, x2, y2):
+    return math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+
+crosscorr=pd.read_excel(r'C:\Users\wiesbrock\Desktop\wiesbrock\Desktop\correlations.xlsx')
+
+path=r'C:\Users\wiesbrock\Desktop\IMARIS traces\20230522\20230522_glass_spont_S001\pos_merged.xlsx'
+pos=pd.read_excel(path)
+
+x_pos=pos['Track Position X Start']
+y_pos=pos['Track Position Y Start']
+
+x_pos=np.array(x_pos)
+y_pos=np.array(y_pos)
+
+crosscorr=np.array(crosscorr)
+
+
+distance_matrix=np.zeros((len(active_indices),len(active_indices)))
+print('Distance Matrix is in progress...')
+for i in tqdm(range(len(active_indices))):
+    for j in range(len(active_indices)):
+        distance_matrix[i,j]=distance(x_pos[active_indices[i]],y_pos[active_indices[i]],x_pos[active_indices[j]],y_pos[active_indices[j]])
+print('Distance Matrix done') 
+#crosscorr[distance_matrix>250]=0
+import numpy as np
+from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
+
+# Annahme: x_pos und y_pos sind Ihre Positionsdaten als NumPy-Arrays
+# Sie sollten die Anzahl der Cluster (Zell-Cluster) festlegen.
+num_clusters = 4  # Ändern Sie dies entsprechend Ihren Daten
+
+# Kombinieren Sie x_pos und y_pos zu einer Matrix
+data_matrix = np.column_stack((x_pos, y_pos))
+
+wcss = []  # Within-Cluster-Sum-of-Squares
+max_clusters = 10  # Maximale Anzahl von Clustern, die getestet werden
+for i in range(1, max_clusters + 1):
+    kmeans = KMeans(n_clusters=i, random_state=0)
+    kmeans.fit(data_matrix)
+    wcss.append(kmeans.inertia_)
+
+
+
+# Initialisieren und trainieren Sie das K-Means-Modell
+kmeans = KMeans(n_clusters=num_clusters, random_state=0)
+kmeans.fit(data_matrix)
+
+# Die Zuordnung jeder Position zu einem Cluster
+cluster_labels = kmeans.labels_
+
+# Die Zentren der Cluster
+cluster_centers = kmeans.cluster_centers_
+
+# Erstellen Sie einen Scatterplot, der die Cluster in verschiedenen Farben darstellt
+plt.figure(figsize=(20, 20))
+for cluster_id in range(num_clusters):
+    cluster_x = data_matrix[cluster_labels == cluster_id, 0]
+    cluster_y = data_matrix[cluster_labels == cluster_id, 1]
+    plt.scatter(cluster_x, cluster_y, label=f'Cluster {cluster_id + 1}')
+    plt.grid(visible=False)
+    plt.yticks([])
+    plt.xticks([])
+    plt.ylabel([])
+    plt.xlabel([])
+    
+print('Draw figure')    
+for i in tqdm(range(len(active_indices))):
+    for j in range(len(active_indices)):
+        if i != j:
+            if crosscorr[i,j]>0.9 or crosscorr[j,i]>0.9:# Punkte nicht mit sich selbst verbinden
+                plt.plot([x_pos[active_indices[i]], x_pos[active_indices[j]]], [y_pos[active_indices[i]], y_pos[active_indices[j]]], '-',c=plt.cm.jet((crosscorr[i,j]+crosscorr[j,i])/2),lw=5) 
+print('Draw figure done') 
+#plt.scatter(cluster_centers[:, 0], cluster_centers[:, 1], c='black', s=100, marker='x', label='Cluster Center')
+plt.xlabel('X-Position')
+plt.ylabel('Y-Position')
+sns.despine()
+#plt.title('Zell-Cluster')
+#plt.legend()
+plt.show()
     
 
 
